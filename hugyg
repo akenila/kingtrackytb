@@ -1,3 +1,16 @@
+
+import os
+import psutil
+import undetected_chromedriver as uc
+from webdriver_manager.chrome import ChromeDriverManager
+import tkinter as tk
+from tkinter import filedialog
+import threading
+import time
+import yt_dlp
+import cv2
+import subprocess
+
 def is_valid_cookie_file(cookie_path):
     if not os.path.exists(cookie_path):
         return False
@@ -111,50 +124,25 @@ def get_cookie_with_profile(full_profile_path, chrome_path='./ChromePortable/Goo
 def process_video(video):
     video_id = video.get('id')
     channel = video.get('uploader') or 'Unknown'
+    title = video.get('title') or video_id
     video_url = video.get('url') or f'https://www.youtube.com/watch?v={video_id}'
-    # Đọc ánh xạ kênh -> folder
-    channel_folder = load_channel_folder_map()
-    if channel in channel_folder:
-        folder_name = channel_folder[channel]
-    else:
-        import uuid
-        folder_name = f'Channel_{uuid.uuid4().hex[:8]}'
-        channel_folder[channel] = folder_name
-        save_channel_folder_map(channel_folder)
-    folder = os.path.join(RESULTS_DIR, folder_name)
+    # Tạo folder theo tên kênh
+    folder = os.path.join(RESULTS_DIR, channel)
     os.makedirs(folder, exist_ok=True)
-    video_file = os.path.join(folder, f'{video_id}.mp4')
-    thumb_file = os.path.join(folder, f'{video_id}_1s.jpg')
+    # Đổi tên file theo title (loại bỏ ký tự đặc biệt)
+    safe_title = "".join(c for c in title if c.isalnum() or c in " _-").rstrip()
+    video_file = os.path.join(folder, f'{safe_title}.mp4')
+    thumb_file = os.path.join(folder, f'{safe_title}_1s.jpg')
     download_video(video_url, video_file)
     extract_thumbnail(video_file, thumb_file)
     save_processed_id(video_id)
     save_processed_url(video_url)
 
-
-
 def process_manual_links(links, folder_name):
-    channel_folder = load_channel_folder_map()
-    # Kiểm tra cookie trước khi tải
-    import tkinter as tk
-    from tkinter import messagebox
-    # Nếu file cookie rỗng hoặc sai định dạng thì lấy lại cookie
-    if not is_valid_cookie_file(COOKIE_FILE):
-        # Hỏi người dùng nhập profile path nếu chưa có
-        root = tk._default_root
-        profile_path = None
-        if root:
-            for widget in root.winfo_children():
-                if isinstance(widget, tk.Entry) and widget.get():
-                    profile_path = widget.get()
-                    break
-        if not profile_path:
-            profile_path = ''
-        messagebox.showinfo('Cookie', 'Cookie rỗng hoặc sai định dạng, đang lấy lại cookie...')
-        get_cookie_with_profile(profile_path)
     for link in links:
         ydl_opts = {
             'cookiefile': COOKIE_FILE,
-            'outtmpl': os.path.join(RESULTS_DIR, '%(id)s.%(ext)s'),
+            'outtmpl': os.path.join(RESULTS_DIR, '%(uploader)s', '%(title)s.%(ext)s'),
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe',
             'merge_output_format': 'mp4',
@@ -163,21 +151,16 @@ def process_manual_links(links, folder_name):
             info = ydl.extract_info(link, download=True)
             video_id = info.get('id')
             channel = info.get('uploader') or 'Unknown'
-            # Ánh xạ kênh sang folder
-            if channel in channel_folder:
-                folder_name_for_channel = channel_folder[channel]
-            else:
-                import uuid
-                folder_name_for_channel = f'Channel_{uuid.uuid4().hex[:8]}'
-                channel_folder[channel] = folder_name_for_channel
-                save_channel_folder_map(channel_folder)
-            folder_for_channel = os.path.join(RESULTS_DIR, folder_name_for_channel)
+            title = info.get('title') or video_id
+            safe_title = "".join(c for c in title if c.isalnum() or c in " _-").rstrip()
+            folder_for_channel = os.path.join(RESULTS_DIR, channel)
             os.makedirs(folder_for_channel, exist_ok=True)
-            video_file = os.path.join(folder_for_channel, f'{video_id}.mp4')
-            thumb_file = os.path.join(folder_for_channel, f'{video_id}_1s.jpg')
+            video_file = os.path.join(folder_for_channel, f'{safe_title}.mp4')
+            thumb_file = os.path.join(folder_for_channel, f'{safe_title}_1s.jpg')
             extract_thumbnail(video_file, thumb_file)
             save_processed_id(video_id)
             save_processed_url(f"https://www.youtube.com/watch?v={video_id}")
+
 
 def start_scan(scan_time_var, num_videos_var, profile_path_var, status_var):
     def scan_loop():
@@ -299,35 +282,6 @@ def extract_thumbnail(video_path, output_path):
         cv2.imwrite(output_path, frame)
     cap.release()
 
-def process_manual_links(links, folder_name):
-    channel_folder = load_channel_folder_map()
-    for link in links:
-        ydl_opts = {
-            'cookiefile': COOKIE_FILE,
-            'outtmpl': os.path.join(RESULTS_DIR, '%(id)s.%(ext)s'),
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe',
-            'merge_output_format': 'mp4',
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(link, download=True)
-            video_id = info.get('id')
-            channel = info.get('uploader') or 'Unknown'
-            # Ánh xạ kênh sang folder
-            if channel in channel_folder:
-                folder_name_for_channel = channel_folder[channel]
-            else:
-                import uuid
-                folder_name_for_channel = f'Channel_{uuid.uuid4().hex[:8]}'
-                channel_folder[channel] = folder_name_for_channel
-                save_channel_folder_map(channel_folder)
-            folder_for_channel = os.path.join(RESULTS_DIR, folder_name_for_channel)
-            os.makedirs(folder_for_channel, exist_ok=True)
-            video_file = os.path.join(folder_for_channel, f'{video_id}.mp4')
-            thumb_file = os.path.join(folder_for_channel, f'{video_id}_1s.jpg')
-            extract_thumbnail(video_file, thumb_file)
-            save_processed_id(video_id)
-            save_processed_url(f"https://www.youtube.com/watch?v={video_id}")
 
 def start_scan(scan_time_var, num_videos_var, profile_path_var, status_var):
     def scan_loop():
