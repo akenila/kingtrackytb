@@ -1,3 +1,43 @@
+def is_valid_cookie_file(cookie_path):
+    if not os.path.exists(cookie_path):
+        return False
+    try:
+        with open(cookie_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            if not content.strip():
+                return False
+            if '# Netscape HTTP Cookie File' not in content:
+                return False
+        return True
+    except Exception:
+        return False
+
+# Biến toàn cục
+COOKIE_FILE = 'cookies.txt'
+RESULTS_DIR = 'Results'
+PROCESSED_IDS_FILE = 'processed_ids.txt'
+CONFIG_FILE = 'config.txt'
+
+# Cấu hình ffmpeg giống file .bat, cho phép nhập đường dẫn ffmpeg
+DEFAULT_FFMPEG_PATH = './ffmpeg'
+FFMPEG_TEMPLATE = (
+    '"{ffmpeg_path}" -ss 00:00:00.5 -y -i "{video_path}" -i "{overlay_img}" '
+    '-filter_complex "[0:v]setpts=PTS/1,crop=iw/1.0:ih/1.0,scale=720:720,setdar=1[v];'
+    'movie={bg_video}:loop=999,setpts=N/(FRAME_RATE*TB),scale=720:720,setdar=1[bg];'
+    '[bg][v]overlay=shortest=1:x=0:y=0[v1];[v1][1:v]overlay=0:0;[0:a]atempo=1,'
+    'aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo" '
+    '-vcodec libx264 -pix_fmt yuv420p -r 30 -g 60 -b:v 1600k -profile:v main -level 3.1 '
+    '-codec:a aac -b:a 128k -ar 44100 -s 720x720 -preset superfast "{output_path}"'
+)
+
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+if os.path.exists(PROCESSED_IDS_FILE):
+    with open(PROCESSED_IDS_FILE, 'r', encoding='utf-8') as f:
+        processed_ids = set(line.strip() for line in f)
+else:
+    processed_ids = set()
+
 def endtask_chrome_portable(chrome_exe_path):
     chrome_exe_path = os.path.abspath(chrome_exe_path)
     killed = 0
@@ -35,65 +75,111 @@ def get_cookie_with_profile(full_profile_path, chrome_path='./ChromePortable/Goo
     driver.get("https://www.youtube.com/feed/subscriptions")
     def to_netscape(cookies, domain=None):
         lines = ["# Netscape HTTP Cookie File", ""]
-        for c in cookies:
-            domain_str = c['domain'] if 'domain' in c else domain or 'youtube.com'
-            flag = 'TRUE' if domain_str.startswith('.') else 'FALSE'
-            path = c.get('path', '/')
-            secure = 'TRUE' if c.get('secure', False) else 'FALSE'
-            expires = str(c.get('expiry', 0))
-            name = c.get('name', '')
-            value = c.get('value', '')
-            lines.append(f"{domain_str}\t{flag}\t{path}\t{secure}\t{expires}\t{name}\t{value}")
-        return '\n'.join(lines)
-    cookies = driver.get_cookies()
-    netscape_cookies = to_netscape(cookies)
-    with open('cookies.txt', 'w', encoding='utf-8') as f:
-        f.write(netscape_cookies)
-    driver.quit()
-    endtask_chrome_portable(chrome_path)
-    print(f"Đã lấy lại cookie với profile path: {profile_path}, profile dir: {profile_dir}")
-import tkinter as tk
-from tkinter import filedialog
-import threading
-import time
-import yt_dlp
-import os
-import cv2
-import subprocess
 
-COOKIE_FILE = 'cookies.txt'
-RESULTS_DIR = 'Results'
-PROCESSED_IDS_FILE = 'processed_ids.txt'
-CONFIG_FILE = 'config.txt'
+def process_video(video):
+    video_id = video.get('id')
+    channel = video.get('uploader') or 'Unknown'
+    video_url = video.get('url') or f'https://www.youtube.com/watch?v={video_id}'
+    # Đọc ánh xạ kênh -> folder
+    channel_folder = load_channel_folder_map()
+    if channel in channel_folder:
+        folder_name = channel_folder[channel]
+    else:
+        import uuid
+        folder_name = f'Channel_{uuid.uuid4().hex[:8]}'
+        channel_folder[channel] = folder_name
+        save_channel_folder_map(channel_folder)
+    folder = os.path.join(RESULTS_DIR, folder_name)
+    os.makedirs(folder, exist_ok=True)
+    video_file = os.path.join(folder, f'{video_id}.mp4')
+    thumb_file = os.path.join(folder, f'{video_id}_1s.jpg')
+    download_video(video_url, video_file)
+    extract_thumbnail(video_file, thumb_file)
 
-# Cấu hình ffmpeg giống file .bat, cho phép nhập đường dẫn ffmpeg
-DEFAULT_FFMPEG_PATH = './ffmpeg'
-FFMPEG_TEMPLATE = (
-    '"{ffmpeg_path}" -ss 00:00:00.5 -y -i "{video_path}" -i "{overlay_img}" '
-    '-filter_complex "[0:v]setpts=PTS/1,crop=iw/1.0:ih/1.0,scale=720:720,setdar=1[v];'
-    'movie={bg_video}:loop=999,setpts=N/(FRAME_RATE*TB),scale=720:720,setdar=1[bg];'
-    '[bg][v]overlay=shortest=1:x=0:y=0[v1];[v1][1:v]overlay=0:0;[0:a]atempo=1,'
-    'aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo" '
-    '-vcodec libx264 -pix_fmt yuv420p -r 30 -g 60 -b:v 1600k -profile:v main -level 3.1 '
-    '-codec:a aac -b:a 128k -ar 44100 -s 720x720 -preset superfast "{output_path}"'
-)
 
-os.makedirs(RESULTS_DIR, exist_ok=True)
 
-if os.path.exists(PROCESSED_IDS_FILE):
-    with open(PROCESSED_IDS_FILE, 'r', encoding='utf-8') as f:
-        processed_ids = set(line.strip() for line in f)
-else:
-    processed_ids = set()
+def process_manual_links(links, folder_name):
+    channel_folder = load_channel_folder_map()
+    for link in links:
+        ydl_opts = {
+            'cookiefile': COOKIE_FILE,
+            'outtmpl': os.path.join(RESULTS_DIR, '%(id)s.%(ext)s'),
+            'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best',
+            'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe'
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(link, download=True)
+            video_id = info.get('id')
+            channel = info.get('uploader') or 'Unknown'
+            # Ánh xạ kênh sang folder
+            if channel in channel_folder:
+                folder_name_for_channel = channel_folder[channel]
+            else:
+                import uuid
+                folder_name_for_channel = f'Channel_{uuid.uuid4().hex[:8]}'
+                channel_folder[channel] = folder_name_for_channel
+                save_channel_folder_map(channel_folder)
+            folder_for_channel = os.path.join(RESULTS_DIR, folder_name_for_channel)
+            os.makedirs(folder_for_channel, exist_ok=True)
+            video_file = os.path.join(folder_for_channel, f'{video_id}.mp4')
+            thumb_file = os.path.join(folder_for_channel, f'{video_id}_1s.jpg')
+            extract_thumbnail(video_file, thumb_file)
+            save_processed_id(video_id)
+
+def start_scan(scan_time_var, num_videos_var, profile_path_var, status_var):
+    def scan_loop():
+        scan_time = int(scan_time_var.get())
+        num_videos = int(num_videos_var.get())
+        profile_path = profile_path_var.get().strip()
+        while True:
+            status_var.set('Đang quét video mới...')
+            try:
+                # Kiểm tra cookie trước khi quét
+                if not is_valid_cookie_file(COOKIE_FILE) and profile_path:
+                    status_var.set('Cookie rỗng hoặc sai định dạng, đang lấy lại cookie...')
+                    get_cookie_with_profile(profile_path)
+                new_videos = get_new_videos_from_subscriptions(num_videos)
+                if len(new_videos) == 0 and profile_path:
+                    status_var.set('Không extract được video, đang lấy lại cookie...')
+                    get_cookie_with_profile(profile_path)
+                    new_videos = get_new_videos_from_subscriptions(num_videos)
+                for video in new_videos:
+                    status_var.set(f'Đang xử lý: {video.get("title")}')
+                    process_video(video)
+                status_var.set(f'Hoàn thành quét!, Chờ {scan_time} giây để quét tiếp...')
+            except Exception as e:
+                status_var.set(f'Lỗi: {e}')
+            time.sleep(scan_time)
+    threading.Thread(target=scan_loop, daemon=True).start()
 
 def save_processed_id(video_id):
     processed_ids.add(video_id)
     with open(PROCESSED_IDS_FILE, 'a', encoding='utf-8') as f:
         f.write(video_id + '\n')
 
-def save_config(folder, channel):
-    with open(CONFIG_FILE, 'a', encoding='utf-8') as f:
-        f.write(f'{folder}:{channel}\n')
+
+# Đọc ánh xạ kênh -> folder từ config.txt
+def load_channel_folder_map():
+    channel_folder = {}
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if ':' in line:
+                    folder, channel = line.split(':', 1)
+                    channel_folder[channel] = folder
+    return channel_folder
+
+# Lưu ánh xạ mới vào config.txt
+def save_channel_folder_map(channel_folder):
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        for channel, folder in channel_folder.items():
+            f.write(f'{folder}:{channel}\n')
+
+# Thêm ánh xạ mới
+def add_channel_folder(channel_folder, channel, folder):
+    channel_folder[channel] = folder
+    save_channel_folder_map(channel_folder)
 
 def get_new_videos_from_subscriptions(num_videos):
     ydl_opts = {
@@ -132,47 +218,33 @@ def extract_thumbnail(video_path, output_path):
         cv2.imwrite(output_path, frame)
     cap.release()
 
-def render_video(ffmpeg_path, video_path, overlay_img, bg_video, output_path):
-    cmd = FFMPEG_TEMPLATE.format(
-        ffmpeg_path=ffmpeg_path,
-        video_path=video_path,
-        overlay_img=overlay_img,
-        bg_video=bg_video,
-        output_path=output_path
-    )
-    subprocess.run(cmd, shell=True)
-
-def process_video(video):
-    video_id = video.get('id')
-    channel = video.get('uploader') or 'Unknown'
-    video_url = video.get('url') or f'https://www.youtube.com/watch?v={video_id}'
-    folder = os.path.join(RESULTS_DIR, video_id)
-    os.makedirs(folder, exist_ok=True)
-    video_file = os.path.join(folder, f'{video_id}.mp4')
-    thumb_file = os.path.join(folder, f'{video_id}_1s.jpg')
-    download_video(video_url, video_file)
-    extract_thumbnail(video_file, thumb_file)
-    save_processed_id(video_id)
-    save_config(video_id, channel)
-
 def process_manual_links(links, folder_name):
-    folder = os.path.join(RESULTS_DIR, folder_name)
-    os.makedirs(folder, exist_ok=True)
+    channel_folder = load_channel_folder_map()
     for link in links:
         ydl_opts = {
             'cookiefile': COOKIE_FILE,
-            'outtmpl': os.path.join(folder, '%(id)s.%(ext)s'),
+            'outtmpl': os.path.join(RESULTS_DIR, '%(id)s.%(ext)s'),
             'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best',
             'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe'
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(link, download=True)
             video_id = info.get('id')
-            video_file = os.path.join(folder, f'{video_id}.mp4')
-            thumb_file = os.path.join(folder, f'{video_id}_1s.jpg')
+            channel = info.get('uploader') or 'Unknown'
+            # Ánh xạ kênh sang folder
+            if channel in channel_folder:
+                folder_name_for_channel = channel_folder[channel]
+            else:
+                import uuid
+                folder_name_for_channel = f'Channel_{uuid.uuid4().hex[:8]}'
+                channel_folder[channel] = folder_name_for_channel
+                save_channel_folder_map(channel_folder)
+            folder_for_channel = os.path.join(RESULTS_DIR, folder_name_for_channel)
+            os.makedirs(folder_for_channel, exist_ok=True)
+            video_file = os.path.join(folder_for_channel, f'{video_id}.mp4')
+            thumb_file = os.path.join(folder_for_channel, f'{video_id}_1s.jpg')
             extract_thumbnail(video_file, thumb_file)
             save_processed_id(video_id)
-            save_config(folder_name, info.get('uploader') or 'Unknown')
 
 def start_scan(scan_time_var, num_videos_var, profile_path_var, status_var):
     def scan_loop():
