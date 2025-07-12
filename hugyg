@@ -155,8 +155,9 @@ def process_manual_links(links, folder_name):
         ydl_opts = {
             'cookiefile': COOKIE_FILE,
             'outtmpl': os.path.join(RESULTS_DIR, '%(id)s.%(ext)s'),
-            'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best',
-            'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe'
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe',
+            'merge_output_format': 'mp4',
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(link, download=True)
@@ -176,7 +177,7 @@ def process_manual_links(links, folder_name):
             thumb_file = os.path.join(folder_for_channel, f'{video_id}_1s.jpg')
             extract_thumbnail(video_file, thumb_file)
             save_processed_id(video_id)
-            save_processed_url(link)
+            save_processed_url(f"https://www.youtube.com/watch?v={video_id}")
 
 def start_scan(scan_time_var, num_videos_var, profile_path_var, status_var):
     def scan_loop():
@@ -241,12 +242,12 @@ def get_new_videos_from_subscriptions(num_videos):
     import time
     ydl_opts = {
         'cookiefile': COOKIE_FILE,
-        'extract_flat': False,
         'playlistend': num_videos,
         'skip_download': True,
+        'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe',
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info('https://www.youtube.com/feed/subscriptions', download=False)
+        info = ydl.extract_info('https://www.youtube.com/feed/subscriptions')
         videos = info.get('entries', [])
         new_videos = []
         now = int(time.time())
@@ -283,8 +284,9 @@ def download_video(video_url, output_path):
     ydl_opts = {
         'cookiefile': COOKIE_FILE,
         'outtmpl': output_path,
-        'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best',
-        'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe'
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe',
+        'merge_output_format': 'mp4',
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([video_url])
@@ -303,8 +305,9 @@ def process_manual_links(links, folder_name):
         ydl_opts = {
             'cookiefile': COOKIE_FILE,
             'outtmpl': os.path.join(RESULTS_DIR, '%(id)s.%(ext)s'),
-            'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best',
-            'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe'
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe',
+            'merge_output_format': 'mp4',
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(link, download=True)
@@ -324,7 +327,7 @@ def process_manual_links(links, folder_name):
             thumb_file = os.path.join(folder_for_channel, f'{video_id}_1s.jpg')
             extract_thumbnail(video_file, thumb_file)
             save_processed_id(video_id)
-            save_processed_url(link)
+            save_processed_url(f"https://www.youtube.com/watch?v={video_id}")
 
 def start_scan(scan_time_var, num_videos_var, profile_path_var, status_var):
     def scan_loop():
