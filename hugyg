@@ -218,20 +218,47 @@ def browse_file(entry):
 def main():
     root = tk.Tk()
     root.title('YouTube Auto Downloader')
+
+    # Giá trị mặc định
+    default_scan_time = '30'
+    default_num_videos = '5'
+    default_profile_path = ''
+    default_folder = 'Manual'
+
+    # Load từ file settings.txt nếu có
+    scan_time = default_scan_time
+    num_videos = default_num_videos
+    profile_path = default_profile_path
+    folder = default_folder
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.startswith('Thời gian quét:'):
+                        scan_time = line.split(':',1)[1].strip()
+                    elif line.startswith('Số video muốn quét:'):
+                        num_videos = line.split(':',1)[1].strip()
+                    elif line.startswith('Profile path:'):
+                        profile_path = line.split(':',1)[1].strip()
+                    elif line.startswith('Tên folder:'):
+                        folder = line.split(':',1)[1].strip()
+        except Exception:
+            pass
+
     tk.Label(root, text='Thời gian quét (giây):').grid(row=0, column=0)
-    scan_time_var = tk.StringVar(value='30')
+    scan_time_var = tk.StringVar(value=scan_time)
     tk.Entry(root, textvariable=scan_time_var).grid(row=0, column=1)
     tk.Label(root, text='Số video muốn quét:').grid(row=1, column=0)
-    num_videos_var = tk.StringVar(value='5')
+    num_videos_var = tk.StringVar(value=num_videos)
     tk.Entry(root, textvariable=num_videos_var).grid(row=1, column=1)
     tk.Label(root, text='Profile path:').grid(row=2, column=0)
-    profile_path_var = tk.StringVar(value='G:/Job/YoutubeTracking/ChromePortable/Data/profile')
+    profile_path_var = tk.StringVar(value=profile_path)
     tk.Entry(root, textvariable=profile_path_var, width=50).grid(row=2, column=1)
     tk.Label(root, text='Nhập link video (mỗi dòng 1 link):').grid(row=3, column=0)
     links_text = tk.Text(root, height=5, width=50)
     links_text.grid(row=3, column=1)
     tk.Label(root, text='Tên folder cho link nhập:').grid(row=4, column=0)
-    folder_var = tk.StringVar(value='Manual')
+    folder_var = tk.StringVar(value=folder)
     tk.Entry(root, textvariable=folder_var).grid(row=4, column=1)
     status_var = tk.StringVar()
     tk.Label(root, textvariable=status_var).grid(row=5, column=0, columnspan=2)
