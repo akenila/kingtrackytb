@@ -120,29 +120,72 @@ def get_cookie_with_profile(full_profile_path, chrome_path='./ChromePortable/Goo
     endtask_chrome_portable(r"./ChromePortable/App/Chrome-bin/chrome.exe")
     print(f"Đã lấy lại cookie với profile path: {profile_path}, profile dir: {profile_dir}")
 
-
 def process_video(video):
+    import threading
     video_id = video.get('id')
     channel = video.get('uploader') or 'Unknown'
     title = video.get('title') or video_id
     video_url = video.get('url') or f'https://www.youtube.com/watch?v={video_id}'
-    # Tạo folder theo tên kênh
-    folder = os.path.join(RESULTS_DIR, channel)
-    os.makedirs(folder, exist_ok=True)
-    # Đổi tên file theo title (loại bỏ ký tự đặc biệt)
+    folder_in = 'in1'
+    os.makedirs(folder_in, exist_ok=True)
     safe_title = "".join(c for c in title if c.isalnum() or c in " _-").rstrip()
-    video_file = os.path.join(folder, f'{safe_title}.mp4')
-    thumb_file = os.path.join(folder, f'{safe_title}_1s.jpg')
-    download_video(video_url, video_file)
-    extract_thumbnail(video_file, thumb_file)
+    input_path = os.path.join(folder_in, f'{safe_title}.mp4')
+    download_video(video_url, input_path)
     save_processed_id(video_id)
     save_processed_url(video_url)
 
+    # Tạo thumbnail 1s đầu và lưu vào folder Z Iteam Code in Bin
+    thumb_folder = "Z Iteam Code in Bin"
+    os.makedirs(thumb_folder, exist_ok=True)
+    thumb_path = os.path.join(thumb_folder, f'{safe_title}_1s.jpg')
+    extract_thumbnail(input_path, thumb_path)
+
+    # Xử lý ffmpeg bất đồng bộ
+    def ffmpeg_thread():
+        # Đầu ra vào folder tên kênh trong Results
+        output_folder = os.path.join(RESULTS_DIR, channel)
+        os.makedirs(output_folder, exist_ok=True)
+        output_path = os.path.join(output_folder, f'{safe_title}.mp4')
+        overlay_img = thumb_path
+        bg_video = os.path.relpath(input_path).replace("\\", "/")
+        filter_complex = (
+            f'[0:v]setpts=PTS/1,crop=iw/1.0:ih/1.0,scale=720:720,setdar=1[v];'
+            f"movie='{bg_video}':loop=999,setpts=N/(FRAME_RATE*TB),scale=720:720,setdar=1[bg];"
+            '[bg][v]overlay=shortest=1:x=0:y=0[v1];[v1][1:v]overlay=0:0;'
+            '[0:a]atempo=1,aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo'
+        )
+        ffmpeg_cmd = [
+            DEFAULT_FFMPEG_PATH + "/bin/ffmpeg.exe",
+            "-ss", "00:00:00.5",
+            "-y",
+            "-i", input_path,
+            "-i", overlay_img,
+            "-filter_complex", filter_complex,
+            "-vcodec", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-r", "30",
+            "-g", "60",
+            "-b:v", "1600k",
+            "-profile:v", "main",
+            "-level", "3.1",
+            "-codec:a", "aac",
+            "-b:a", "128k",
+            "-ar", "44100",
+            "-s", "720x720",
+            "-preset", "superfast",
+            output_path
+        ]
+        subprocess.Popen(ffmpeg_cmd)
+
+    threading.Thread(target=ffmpeg_thread, daemon=True).start()
+
 def process_manual_links(links, folder_name):
+    folder = 'in1'
+    os.makedirs(folder, exist_ok=True)
     for link in links:
         ydl_opts = {
             'cookiefile': COOKIE_FILE,
-            'outtmpl': os.path.join(RESULTS_DIR, '%(uploader)s', '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(folder, '%(title)s.%(ext)s'),
             'format': 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best',
             'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe',
             'merge_output_format': 'mp4',
@@ -150,18 +193,8 @@ def process_manual_links(links, folder_name):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(link, download=True)
             video_id = info.get('id')
-            channel = info.get('uploader') or 'Unknown'
-            title = info.get('title') or video_id
-            safe_title = "".join(c for c in title if c.isalnum() or c in " _-").rstrip()
-            folder_for_channel = os.path.join(RESULTS_DIR, channel)
-            os.makedirs(folder_for_channel, exist_ok=True)
-            video_file = os.path.join(folder_for_channel, f'{safe_title}.mp4')
-            thumb_file = os.path.join(folder_for_channel, f'{safe_title}_1s.jpg')
-            extract_thumbnail(video_file, thumb_file)
             save_processed_id(video_id)
             save_processed_url(f"https://www.youtube.com/watch?v={video_id}")
-
-
 def start_scan(scan_time_var, num_videos_var, profile_path_var, status_var):
     def scan_loop():
         scan_time = int(scan_time_var.get())
