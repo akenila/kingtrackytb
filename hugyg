@@ -38,17 +38,6 @@ if os.path.exists(PROCESSED_IDS_FILE):
 else:
     processed_ids = set()
 
-def endtask_chrome_portable(chrome_exe_path):
-    chrome_exe_path = os.path.abspath(chrome_exe_path)
-    killed = 0
-    for proc in psutil.process_iter(['exe', 'name']):
-        try:
-            if proc.info['exe'] and os.path.abspath(proc.info['exe']) == chrome_exe_path:
-                proc.kill()
-                killed += 1
-        except Exception:
-            pass
-    print(f"Đã kill {killed} tiến trình ChromePortable: {chrome_exe_path}")
 def split_profile_path(full_path):
     # Ví dụ: G:/Job/YoutubeTracking/ChromePortable/Data/profile/Profile 1
     import os
@@ -64,9 +53,28 @@ import undetected_chromedriver as uc
 import undetected_chromedriver as uc
 from webdriver_manager.chrome import ChromeDriverManager
 SETTINGS_FILE = 'settings.txt'
+def endtask_chrome_portable(target_exe_path):
+    target_exe_path = os.path.abspath(target_exe_path)  # Chuyển relative path thành absolute path
+    target_exe_path = os.path.normcase(target_exe_path) # Normalize path cho Windows (bỏ phân biệt hoa/thường)
+    print(f"Target exe path after normalize: {target_exe_path}")
+    
+    count = 0
+    for proc in psutil.process_iter(['pid', 'exe', 'name']):
+        try:
+            exe_path = proc.info['exe']
+            if exe_path:
+                exe_path_norm = os.path.normcase(exe_path)
+                if exe_path_norm == target_exe_path:
+                    print(f"Terminating PID={proc.pid}, exe={exe_path}")
+                    proc.terminate()
+                    count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    print(f"Đã terminate {count} tiến trình có exe path: {target_exe_path}")
+
 def get_cookie_with_profile(full_profile_path, chrome_path='./ChromePortable/GoogleChromePortable.exe'):
     profile_path, profile_dir = split_profile_path(full_profile_path)
-    endtask_chrome_portable(chrome_path)
+    endtask_chrome_portable(r"./ChromePortable/App/Chrome-bin/chrome.exe")
     options = uc.ChromeOptions()
     options.add_argument(f"--user-data-dir={profile_path}")
     options.add_argument(f"--profile-directory={profile_dir}")
@@ -75,6 +83,24 @@ def get_cookie_with_profile(full_profile_path, chrome_path='./ChromePortable/Goo
     driver.get("https://www.youtube.com/feed/subscriptions")
     def to_netscape(cookies, domain=None):
         lines = ["# Netscape HTTP Cookie File", ""]
+        for c in cookies:
+            domain_str = c['domain'] if 'domain' in c else domain or 'youtube.com'
+            flag = 'TRUE' if domain_str.startswith('.') else 'FALSE'
+            path = c.get('path', '/')
+            secure = 'TRUE' if c.get('secure', False) else 'FALSE'
+            expires = str(c.get('expiry', 0))
+            name = c.get('name', '')
+            value = c.get('value', '')
+            lines.append(f"{domain_str}\t{flag}\t{path}\t{secure}\t{expires}\t{name}\t{value}")
+        return '\n'.join(lines)
+    cookies = driver.get_cookies()
+    netscape_cookies = to_netscape(cookies)
+    with open('cookies.txt', 'w', encoding='utf-8') as f:
+        f.write(netscape_cookies)
+    driver.quit()
+    endtask_chrome_portable(r"./ChromePortable/App/Chrome-bin/chrome.exe")
+    print(f"Đã lấy lại cookie với profile path: {profile_path}, profile dir: {profile_dir}")
+
 
 def process_video(video):
     video_id = video.get('id')
@@ -100,6 +126,23 @@ def process_video(video):
 
 def process_manual_links(links, folder_name):
     channel_folder = load_channel_folder_map()
+    # Kiểm tra cookie trước khi tải
+    import tkinter as tk
+    from tkinter import messagebox
+    # Nếu file cookie rỗng hoặc sai định dạng thì lấy lại cookie
+    if not is_valid_cookie_file(COOKIE_FILE):
+        # Hỏi người dùng nhập profile path nếu chưa có
+        root = tk._default_root
+        profile_path = None
+        if root:
+            for widget in root.winfo_children():
+                if isinstance(widget, tk.Entry) and widget.get():
+                    profile_path = widget.get()
+                    break
+        if not profile_path:
+            profile_path = ''
+        messagebox.showinfo('Cookie', 'Cookie rỗng hoặc sai định dạng, đang lấy lại cookie...')
+        get_cookie_with_profile(profile_path)
     for link in links:
         ydl_opts = {
             'cookiefile': COOKIE_FILE,
@@ -132,12 +175,12 @@ def start_scan(scan_time_var, num_videos_var, profile_path_var, status_var):
         num_videos = int(num_videos_var.get())
         profile_path = profile_path_var.get().strip()
         while True:
+            # Kiểm tra cookie trước mỗi lần quét
+            if is_valid_cookie_file(COOKIE_FILE) == False:
+                status_var.set('Cookie rỗng hoặc sai định dạng, đang lấy lại cookie...')
+                get_cookie_with_profile(profile_path)
             status_var.set('Đang quét video mới...')
             try:
-                # Kiểm tra cookie trước khi quét
-                if not is_valid_cookie_file(COOKIE_FILE) and profile_path:
-                    status_var.set('Cookie rỗng hoặc sai định dạng, đang lấy lại cookie...')
-                    get_cookie_with_profile(profile_path)
                 new_videos = get_new_videos_from_subscriptions(num_videos)
                 if len(new_videos) == 0 and profile_path:
                     status_var.set('Không extract được video, đang lấy lại cookie...')
@@ -252,12 +295,26 @@ def start_scan(scan_time_var, num_videos_var, profile_path_var, status_var):
         num_videos = int(num_videos_var.get())
         profile_path = profile_path_var.get().strip()
         while True:
+            # Kiểm tra cookie trước mỗi lần quét
+            if not is_valid_cookie_file(COOKIE_FILE) and profile_path:
+                status_var.set('Cookie rỗng hoặc sai định dạng, đang lấy lại cookie...')
+                get_cookie_with_profile(profile_path)
+                # Kiểm tra lại sau khi lấy cookie
+                if not is_valid_cookie_file(COOKIE_FILE):
+                    status_var.set('Không thể lấy lại cookie hợp lệ. Vui lòng kiểm tra lại profile path hoặc đăng nhập lại YouTube.')
+                    time.sleep(scan_time)
+                    continue
             status_var.set('Đang quét video mới...')
             try:
                 new_videos = get_new_videos_from_subscriptions(num_videos)
                 if len(new_videos) == 0 and profile_path:
                     status_var.set('Không extract được video, đang lấy lại cookie...')
                     get_cookie_with_profile(profile_path)
+                    # Kiểm tra lại sau khi lấy cookie
+                    if not is_valid_cookie_file(COOKIE_FILE):
+                        status_var.set('Không thể lấy lại cookie hợp lệ. Vui lòng kiểm tra lại profile path hoặc đăng nhập lại YouTube.')
+                        time.sleep(scan_time)
+                        continue
                     new_videos = get_new_videos_from_subscriptions(num_videos)
                 for video in new_videos:
                     status_var.set(f'Đang xử lý: {video.get("title")}')
