@@ -1,5 +1,3 @@
-
-
 def is_valid_cookie_file(cookie_path):
     if not os.path.exists(cookie_path):
         return False
@@ -240,6 +238,7 @@ def add_channel_folder(channel_folder, channel, folder):
     save_channel_folder_map(channel_folder)
 
 def get_new_videos_from_subscriptions(num_videos):
+    import time
     ydl_opts = {
         'cookiefile': COOKIE_FILE,
         'extract_flat': False,
@@ -250,12 +249,17 @@ def get_new_videos_from_subscriptions(num_videos):
         info = ydl.extract_info('https://www.youtube.com/feed/subscriptions', download=False)
         videos = info.get('entries', [])
         new_videos = []
+        now = int(time.time())
         for video in videos:
             video_id = video.get('id')
             video_url = video.get('url') or f'https://www.youtube.com/watch?v={video_id}'
             duration = video.get('duration')
             is_live = video.get('is_live') or video.get('was_live_streamed')
+            availability = video.get('availability')
+            release_timestamp = video.get('release_timestamp')
+            scheduled_start_time = video.get('scheduled_start_time')
             # Lọc: không tải video live, không tải video > 1h30p, không tải nếu đã có id hoặc url
+            # Bổ sung: không tải video chưa đăng (upcoming/premiere)
             if not video_id or not video_url:
                 continue
             if (video_id in processed_ids) or (video_url in processed_urls):
@@ -263,6 +267,11 @@ def get_new_videos_from_subscriptions(num_videos):
             if is_live:
                 continue
             if duration is not None and duration > 5400:
+                continue
+            # Lọc video chưa đăng (upcoming/premiere)
+            if availability in ['private', 'unlisted', 'scheduled', 'premiere']:
+                continue
+            if (release_timestamp and release_timestamp > now) or (scheduled_start_time and scheduled_start_time > now):
                 continue
             new_videos.append(video)
         return new_videos
