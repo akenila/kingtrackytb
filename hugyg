@@ -131,6 +131,8 @@ def process_video(video):
     safe_title = "".join(c for c in title if c.isalnum() or c in " _-").rstrip()
     input_path = os.path.join(folder_in, f'{safe_title}.mp4')
     download_video(video_url, input_path)
+    if video_id in error_ids:
+        return
     save_processed_id(video_id)
     save_processed_url(video_url)
 
@@ -139,6 +141,7 @@ def process_video(video):
     os.makedirs(thumb_folder, exist_ok=True)
     thumb_path = os.path.join(thumb_folder, f'{safe_title}_1s.jpg')
     extract_thumbnail(input_path, thumb_path)
+    
 
     # Xử lý ffmpeg bất đồng bộ
     def ffmpeg_thread():
@@ -290,11 +293,25 @@ def get_new_videos_from_subscriptions(num_videos):
                 continue
             if (release_timestamp and release_timestamp > now) or (scheduled_start_time and scheduled_start_time > now):
                 continue
+            if video_id in error_ids:
+                continue
             new_videos.append(video)
         return new_videos
 
-def download_video(video_url, output_path):
-    # Đảm bảo folder tồn tại
+ERROR_IDS_FILE = 'error_ids.txt'
+error_ids = set()
+
+# Đọc error_ids từ file khi khởi động
+if os.path.exists(ERROR_IDS_FILE):
+    with open(ERROR_IDS_FILE, 'r', encoding='utf-8') as f:
+        error_ids = set(line.strip() for line in f if line.strip())
+
+def save_error_id(video_id):
+    error_ids.add(video_id)
+    with open(ERROR_IDS_FILE, 'a', encoding='utf-8') as f:
+        f.write(video_id + '\n')
+
+def download_video(video_url, output_path, video_id=None):
     folder = os.path.dirname(os.path.abspath(output_path))
     os.makedirs(folder, exist_ok=True)
     ydl_opts = {
@@ -304,8 +321,13 @@ def download_video(video_url, output_path):
         'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe',
         'merge_output_format': 'mp4',
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([video_url])
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+    except Exception as e:
+        if video_id:
+            save_error_id(video_id)
+        print(f"Lỗi tải video {video_id}: {e}")
 
 def extract_thumbnail(video_path, output_path):
     cap = cv2.VideoCapture(video_path)
