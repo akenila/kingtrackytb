@@ -1,4 +1,16 @@
 
+import os
+import psutil
+import undetected_chromedriver as uc
+from webdriver_manager.chrome import ChromeDriverManager
+import tkinter as tk
+from tkinter import filedialog
+import threading
+import time
+import yt_dlp
+import cv2
+import subprocess
+
 def is_valid_cookie_file(cookie_path):
     if not os.path.exists(cookie_path):
         return False
@@ -109,10 +121,8 @@ def get_cookie_with_profile(full_profile_path, chrome_path='./ChromePortable/Goo
     print(f"Đã lấy lại cookie với profile path: {profile_path}, profile dir: {profile_dir}")
 
 import shutil
-# ...existing code...
 
 def process_video(video):
-    import threading
     video_id = video.get('id')
     channel = video.get('uploader') or 'Unknown'
     title = video.get('title') or video_id
@@ -128,51 +138,59 @@ def process_video(video):
     save_processed_url(video_url)
 
     # Tạo thumbnail 1s đầu và lưu vào folder Z Iteam Code in Bin
-    thumb_folder = "Z Iteam Code in Bin"
+    thumb_folder = os.path.join(RESULTS_DIR, channel)
     os.makedirs(thumb_folder, exist_ok=True)
-    thumb_path = os.path.join(thumb_folder, f'Quochoifull.png')
+    thumb_path = os.path.join(thumb_folder, f'{safe_title}.jpg')
+    # Tạo thumbnail bằng ffmpeg (ảnh 1s đầu)
+    ffmpeg_thumb_cmd = [
+        DEFAULT_FFMPEG_PATH + "/bin/ffmpeg.exe",
+        "-ss", "1",
+        "-i", input_path,
+        "-vframes", "1",
+        "-q:v", "2",
+        thumb_path
+    ]
+    subprocess.run(ffmpeg_thumb_cmd)
 
     # Copy video sang Z Iteam Code in Bin để làm bg_video
     bg_video_path = os.path.join(thumb_folder, f'{safe_title}.mp4')
     shutil.copy2(input_path, bg_video_path)
 
-    # Xử lý ffmpeg bất đồng bộ
-    def ffmpeg_thread():
-        output_folder = os.path.join(RESULTS_DIR, channel)
-        os.makedirs(output_folder, exist_ok=True)
-        output_path = os.path.join(output_folder, f'{safe_title}.mp4')
-        overlay_img = thumb_path
-        bg_video = os.path.relpath(bg_video_path).replace("\\", "/")
-        filter_complex = (
-            f'[0:v]setpts=PTS/1,crop=iw/1.0:ih/1.0,scale=720:720,setdar=1[v];'
-            f"movie='{bg_video}':loop=999,setpts=N/(FRAME_RATE*TB),scale=720:720,setdar=1[bg];"
-            '[bg][v]overlay=shortest=1:x=0:y=0[v1];[v1][1:v]overlay=0:0;'
-            '[0:a]atempo=1,aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo'
-        )
-        ffmpeg_cmd = [
-            DEFAULT_FFMPEG_PATH + "/bin/ffmpeg.exe",
-            "-ss", "00:00:00.5",
-            "-y",
-            "-i", input_path,
-            "-i", overlay_img,
-            "-filter_complex", filter_complex,
-            "-vcodec", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-r", "30",
-            "-g", "60",
-            "-b:v", "1600k",
-            "-profile:v", "main",
-            "-level", "3.1",
-            "-codec:a", "aac",
-            "-b:a", "128k",
-            "-ar", "44100",
-            "-s", "720x720",
-            "-preset", "superfast",
-            output_path
-        ]
-        subprocess.Popen(ffmpeg_cmd)
+    # Render video ngay (không dùng threading)
+    output_folder = os.path.join(RESULTS_DIR, channel)
+    os.makedirs(output_folder, exist_ok=True)
+    output_path = os.path.join(output_folder, f'{safe_title}.mp4')
+    overlay_img = thumb_path
+    bg_video = os.path.relpath(bg_video_path).replace("\\", "/")
+    filter_complex = (
+        f'[0:v]setpts=PTS/1,crop=iw/1.0:ih/1.0,scale=720:720,setdar=1[v];'
+        f"movie='{bg_video}':loop=999,setpts=N/(FRAME_RATE*TB),scale=720:720,setdar=1[bg];"
+        '[bg][v]overlay=shortest=1:x=0:y=0[v1];[v1][1:v]overlay=0:0;'
+        '[0:a]atempo=1,aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo'
+    )
+    ffmpeg_cmd = [
+        DEFAULT_FFMPEG_PATH + "/bin/ffmpeg.exe",
+        "-ss", "00:00:00.5",
+        "-y",
+        "-i", input_path,
+        "-i", overlay_img,
+        "-filter_complex", filter_complex,
+        "-vcodec", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-r", "30",
+        "-g", "60",
+        "-b:v", "1600k",
+        "-profile:v", "main",
+        "-level", "3.1",
+        "-codec:a", "aac",
+        "-b:a", "128k",
+        "-ar", "44100",
+        "-s", "720x720",
+        "-preset", "superfast",
+        output_path
+    ]
+    subprocess.run(ffmpeg_cmd)
 
-    threading.Thread(target=ffmpeg_thread, daemon=True).start()
 def process_manual_links(links, folder_name):
     folder = 'in1'
     os.makedirs(folder, exist_ok=True)
