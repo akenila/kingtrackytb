@@ -1,16 +1,4 @@
 
-import os
-import psutil
-import undetected_chromedriver as uc
-from webdriver_manager.chrome import ChromeDriverManager
-import tkinter as tk
-from tkinter import filedialog
-import threading
-import time
-import yt_dlp
-import cv2
-import subprocess
-
 def is_valid_cookie_file(cookie_path):
     if not os.path.exists(cookie_path):
         return False
@@ -143,11 +131,15 @@ def process_video(video):
     bg_video_path = os.path.join(thumb_folder, f'{safe_title}.mp4')
     shutil.copy2(input_path, bg_video_path)
 
+    # Đọc ánh xạ kênh -> folder từ config.txt
+    channel_folder_map = load_channel_folder_map()
+    save_folder = channel_folder_map.get(channel, 'Unknown')
+
     # Render video ngay (không dùng threading)
-    output_folder = os.path.join(RESULTS_DIR, channel)
+    output_folder = os.path.join(RESULTS_DIR, save_folder)
     os.makedirs(output_folder, exist_ok=True)
     output_path = os.path.join(output_folder, f'{safe_title}.mp4')
-    overlay_img = os.path.join(thumb_folder, f'Quochoifull.png')  # ảnh tạm, không dùng cho thumbnail cuối
+    overlay_img = os.path.join(thumb_folder, f'Quochoifull.png')
     bg_video = os.path.relpath(bg_video_path).replace("\\", "/")
     filter_complex = (
         f'[0:v]setpts=PTS/1,crop=iw/1.0:ih/1.0,scale=720:720,setdar=1[v];'
@@ -179,8 +171,7 @@ def process_video(video):
     subprocess.run(ffmpeg_cmd)
 
     # Tạo thumbnail từ video đã render xong
-    thumb_folder = os.path.join(RESULTS_DIR, channel)
-    thumb_path = os.path.join(thumb_folder, f'{safe_title}.jpg')
+    thumb_path = os.path.join(output_folder, f'{safe_title}.jpg')
     ffmpeg_thumb_cmd = [
         DEFAULT_FFMPEG_PATH + "/bin/ffmpeg.exe",
         "-ss", "1",
