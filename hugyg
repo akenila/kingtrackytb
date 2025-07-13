@@ -1,4 +1,16 @@
 
+import os
+import psutil
+import undetected_chromedriver as uc
+from webdriver_manager.chrome import ChromeDriverManager
+import tkinter as tk
+from tkinter import filedialog
+import threading
+import time
+import yt_dlp
+import cv2
+import subprocess
+
 def is_valid_cookie_file(cookie_path):
     if not os.path.exists(cookie_path):
         return False
@@ -195,31 +207,7 @@ def process_manual_links(links, folder_name):
             video_id = info.get('id')
             save_processed_id(video_id)
             save_processed_url(f"https://www.youtube.com/watch?v={video_id}")
-def start_scan(scan_time_var, num_videos_var, profile_path_var, status_var):
-    def scan_loop():
-        scan_time = int(scan_time_var.get())
-        num_videos = int(num_videos_var.get())
-        profile_path = profile_path_var.get().strip()
-        while True:
-            # Kiểm tra cookie trước mỗi lần quét
-            if is_valid_cookie_file(COOKIE_FILE) == False:
-                status_var.set('Cookie rỗng hoặc sai định dạng, đang lấy lại cookie...')
-                get_cookie_with_profile(profile_path)
-            status_var.set('Đang quét video mới...')
-            try:
-                new_videos, check_cookie = get_new_videos_from_subscriptions(num_videos)
-                if len(new_videos) == 0 and profile_path:
-                    status_var.set('Không extract được video, đang lấy lại cookie...')
-                    get_cookie_with_profile(profile_path)
-                    new_videos = get_new_videos_from_subscriptions(num_videos)
-                for video in new_videos:
-                    status_var.set(f'Đang xử lý: {video.get("title")}')
-                    process_video(video)
-                status_var.set(f'Hoàn thành quét!, Chờ {scan_time} giây để quét tiếp...')
-            except Exception as e:
-                status_var.set(f'Lỗi: {e}')
-            time.sleep(scan_time)
-    threading.Thread(target=scan_loop, daemon=True).start()
+
 
 def save_processed_id(video_id):
     processed_ids.add(video_id)
@@ -261,6 +249,7 @@ def get_new_videos_from_subscriptions(num_videos):
         'playlistend': num_videos,
         'skip_download': True,
         'ffmpeg_location': './ffmpeg/bin/ffmpeg.exe',
+        'ignoreerrors': True,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info('https://www.youtube.com/feed/subscriptions')
@@ -271,6 +260,8 @@ def get_new_videos_from_subscriptions(num_videos):
         new_videos = []
         now = int(time.time())
         for video in videos:
+            if video == None:
+                continue
             video_id = video.get('id')
             video_url = video.get('url') or f'https://www.youtube.com/watch?v={video_id}'
             duration = video.get('duration')
